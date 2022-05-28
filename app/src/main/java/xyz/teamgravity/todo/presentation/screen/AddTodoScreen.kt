@@ -8,20 +8,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import kotlinx.coroutines.flow.collectLatest
+import org.orbitmvi.orbit.compose.collectAsState
+import org.orbitmvi.orbit.compose.collectSideEffect
 import xyz.teamgravity.todo.R
-import xyz.teamgravity.todo.core.extension.exhaustive
 import xyz.teamgravity.todo.presentation.component.button.TodoFloatingActionButton
 import xyz.teamgravity.todo.presentation.component.misc.TodoConfigure
 import xyz.teamgravity.todo.presentation.component.topbar.TopBarIconButton
 import xyz.teamgravity.todo.presentation.component.topbar.TopBarTitle
 import xyz.teamgravity.todo.presentation.theme.backgroundLayout
+import xyz.teamgravity.todo.presentation.viewmodel.AddTodoSideEffect
 import xyz.teamgravity.todo.presentation.viewmodel.AddTodoViewModel
 
 @Destination
@@ -31,22 +31,23 @@ fun AddTodoScreen(
     scaffold: ScaffoldState = rememberScaffoldState(),
     navigator: DestinationsNavigator
 ) {
-
     val context = LocalContext.current
+    val state = viewmodel.collectAsState().value
 
-    LaunchedEffect(key1 = viewmodel.event) {
-        viewmodel.event.collectLatest { event ->
-            when (event) {
-                is AddTodoViewModel.AddTodoEvent.InvalidInput -> {
-                    scaffold.snackbarHostState.showSnackbar(message = context.getString(event.message))
-                }
+    suspend fun handleSideEffect(sideEffect: AddTodoSideEffect) {
+        when (sideEffect) {
+            is AddTodoSideEffect.InvalidInput -> {
+                scaffold.snackbarHostState.showSnackbar(message = context.getString(sideEffect.message))
+            }
 
-                AddTodoViewModel.AddTodoEvent.TodoAdded -> {
-                    navigator.popBackStack()
-                }
-            }.exhaustive
+            AddTodoSideEffect.TodoAdded -> {
+                navigator.popBackStack()
+            }
         }
     }
+
+
+    viewmodel.collectSideEffect(sideEffect = ::handleSideEffect)
 
     Scaffold(
         scaffoldState = scaffold,
@@ -76,11 +77,13 @@ fun AddTodoScreen(
                 .background(MaterialTheme.colors.backgroundLayout)
         ) {
             TodoConfigure(
-                name = viewmodel.name,
+                name = state.name,
                 onNameChange = viewmodel::onNameChange,
-                important = viewmodel.important,
+                important = state.important,
                 onImportantChange = viewmodel::onImportantChange
             )
         }
     }
+
 }
+

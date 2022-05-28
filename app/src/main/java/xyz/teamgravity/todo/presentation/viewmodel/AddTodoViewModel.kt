@@ -1,72 +1,69 @@
 package xyz.teamgravity.todo.presentation.viewmodel
 
+import android.os.Parcelable
 import androidx.annotation.StringRes
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.launch
+import kotlinx.parcelize.Parcelize
+import org.orbitmvi.orbit.ContainerHost
+import org.orbitmvi.orbit.syntax.simple.intent
+import org.orbitmvi.orbit.syntax.simple.postSideEffect
+import org.orbitmvi.orbit.syntax.simple.reduce
+import org.orbitmvi.orbit.syntax.simple.repeatOnSubscription
+import org.orbitmvi.orbit.viewmodel.container
 import xyz.teamgravity.todo.R
 import xyz.teamgravity.todo.data.model.TodoModel
 import xyz.teamgravity.todo.data.repository.TodoRepository
 import javax.inject.Inject
 
+@Parcelize
+data class AddTodoState(
+    var name: String = "",
+    var important: Boolean = false,
+) : Parcelable
+
+sealed class AddTodoSideEffect {
+    data class InvalidInput(@StringRes val message: Int) : AddTodoSideEffect()
+    object TodoAdded : AddTodoSideEffect()
+}
+
 @HiltViewModel
 class AddTodoViewModel @Inject constructor(
     private val handle: SavedStateHandle,
     private val repository: TodoRepository
-) : ViewModel() {
+) : ViewModel(), ContainerHost<AddTodoState, AddTodoSideEffect> {
 
-    companion object {
-        private const val TASK_NAME = "task_name"
-        private const val TASK_IMPORTANT = "task_important"
-    }
+    override val container = container<AddTodoState, AddTodoSideEffect>(AddTodoState(), handle)
 
-    private val _event = Channel<AddTodoEvent> { }
-    val event: Flow<AddTodoEvent> = _event.receiveAsFlow()
-
-    var name: String by mutableStateOf(handle.get<String>(TASK_NAME) ?: "")
-        private set
-
-    var important: Boolean by mutableStateOf(handle.get<Boolean>(TASK_IMPORTANT) ?: false)
-        private set
-
-    fun onNameChange(value: String) {
-        name = value
-        handle[TASK_NAME] = value
-    }
-
-    fun onImportantChange(value: Boolean) {
-        important = value
-        handle[TASK_IMPORTANT] = value
-    }
-
-    fun onSaveTodo() {
-        viewModelScope.launch {
-            if (name.isBlank()) {
-                _event.send(AddTodoEvent.InvalidInput(R.string.error_name))
-                return@launch
-            }
-
-            repository.insertTodoSync(
-                TodoModel(
-                    name = name,
-                    important = important
-                )
+    fun onNameChange(value: String) = intent {
+        reduce {
+            state.copy(
+                name = value
             )
-
-            _event.send(AddTodoEvent.TodoAdded)
         }
     }
 
-    sealed class AddTodoEvent {
-        data class InvalidInput(@StringRes val message: Int) : AddTodoEvent()
-        object TodoAdded : AddTodoEvent()
+    fun onImportantChange(value: Boolean) = intent {
+        reduce {
+            state.copy(
+                important = value
+            )
+        }
+    }
+
+    fun onSaveTodo() = intent {
+        if (state.name.isBlank()) {
+            postSideEffect(AddTodoSideEffect.InvalidInput(R.string.error_name))
+            return@intent
+        }
+
+        repository.insertTodoSync(
+            TodoModel(
+                name = state.name,
+                important = state.important
+            )
+        )
+        postSideEffect(AddTodoSideEffect.TodoAdded)
     }
 }

@@ -7,7 +7,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -15,9 +14,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import kotlinx.coroutines.flow.collectLatest
+import org.orbitmvi.orbit.compose.collectAsState
+import org.orbitmvi.orbit.compose.collectSideEffect
 import xyz.teamgravity.todo.R
-import xyz.teamgravity.todo.core.extension.exhaustive
 import xyz.teamgravity.todo.data.model.TodoModel
 import xyz.teamgravity.todo.presentation.component.button.TodoFloatingActionButton
 import xyz.teamgravity.todo.presentation.component.misc.TodoConfigure
@@ -25,6 +24,7 @@ import xyz.teamgravity.todo.presentation.component.topbar.TopBarIconButton
 import xyz.teamgravity.todo.presentation.component.topbar.TopBarTitle
 import xyz.teamgravity.todo.presentation.theme.backgroundLayout
 import xyz.teamgravity.todo.presentation.theme.textSecondary
+import xyz.teamgravity.todo.presentation.viewmodel.EditTodoSideEffect
 import xyz.teamgravity.todo.presentation.viewmodel.EditTodoViewModel
 
 @Destination(navArgsDelegate = EditScreenNavArgs::class)
@@ -36,20 +36,21 @@ fun EditTodoScreen(
 ) {
 
     val context = LocalContext.current
+    val state = viewmodel.collectAsState().value
 
-    LaunchedEffect(key1 = viewmodel.event) {
-        viewmodel.event.collectLatest { event ->
-            when (event) {
-                is EditTodoViewModel.EditTodoEvent.InvalidInput -> {
-                    scaffold.snackbarHostState.showSnackbar(message = context.getString(event.message))
-                }
+    suspend fun handleSideEffect(sideEffect: EditTodoSideEffect) {
+        when (sideEffect) {
+            is EditTodoSideEffect.InvalidInput -> {
+                scaffold.snackbarHostState.showSnackbar(message = context.getString(sideEffect.message))
+            }
 
-                EditTodoViewModel.EditTodoEvent.TodoUpdated -> {
-                    navigator.popBackStack()
-                }
-            }.exhaustive
+            EditTodoSideEffect.TodoUpdated -> {
+                navigator.popBackStack()
+            }
         }
     }
+
+    viewmodel.collectSideEffect(sideEffect = ::handleSideEffect)
 
     Scaffold(
         scaffoldState = scaffold,
@@ -79,14 +80,14 @@ fun EditTodoScreen(
                 .background(MaterialTheme.colors.backgroundLayout)
         ) {
             TodoConfigure(
-                name = viewmodel.name,
+                name = state.name,
                 onNameChange = viewmodel::onNameChange,
-                important = viewmodel.important,
+                important = state.important,
                 onImportantChange = viewmodel::onImportantChange
             )
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = stringResource(id = R.string.your_created_timestamp, viewmodel.timestamp),
+                text = stringResource(id = R.string.your_created_timestamp, state.timestamp),
                 style = MaterialTheme.typography.body1,
                 color = MaterialTheme.colors.textSecondary,
                 modifier = Modifier.padding(horizontal = 12.dp)

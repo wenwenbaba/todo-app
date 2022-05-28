@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ramcosta.composedestinations.annotation.Destination
+import com.ramcosta.composedestinations.annotation.RootNavGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import kotlinx.coroutines.flow.collectLatest
 import xyz.teamgravity.todo.R
@@ -29,7 +30,8 @@ import xyz.teamgravity.todo.presentation.screen.destinations.EditTodoScreenDesti
 import xyz.teamgravity.todo.presentation.theme.backgroundLayout
 import xyz.teamgravity.todo.presentation.viewmodel.TodoListViewModel
 
-@Destination(start = true)
+@RootNavGraph(start = true)
+@Destination
 @Composable
 fun TodoListScreen(
     viewmodel: TodoListViewModel = hiltViewModel(),

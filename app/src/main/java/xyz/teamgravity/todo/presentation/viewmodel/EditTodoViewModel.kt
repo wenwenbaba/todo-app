@@ -1,83 +1,83 @@
 package xyz.teamgravity.todo.presentation.viewmodel
 
+import android.os.Parcelable
 import androidx.annotation.StringRes
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.launch
+import kotlinx.parcelize.Parcelize
+import org.orbitmvi.orbit.ContainerHost
+import org.orbitmvi.orbit.syntax.simple.intent
+import org.orbitmvi.orbit.syntax.simple.postSideEffect
+import org.orbitmvi.orbit.syntax.simple.reduce
+import org.orbitmvi.orbit.viewmodel.container
 import xyz.teamgravity.todo.R
 import xyz.teamgravity.todo.data.model.TodoModel
 import xyz.teamgravity.todo.data.repository.TodoRepository
 import xyz.teamgravity.todo.injection.FullTimeFormatter
 import xyz.teamgravity.todo.presentation.screen.destinations.EditTodoScreenDestination
 import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
+
+@Parcelize
+data class EditTodoState(
+    val name: String,
+    val important: Boolean,
+    val timestamp: String
+) : Parcelable
+
+sealed class EditTodoSideEffect {
+    data class InvalidInput(@StringRes val message: Int) : EditTodoSideEffect()
+    object TodoUpdated : EditTodoSideEffect()
+}
 
 @HiltViewModel
 class EditTodoViewModel @Inject constructor(
     private val handle: SavedStateHandle,
     private val repository: TodoRepository,
     @FullTimeFormatter private val formatter: SimpleDateFormat
-) : ViewModel() {
+) : ViewModel(), ContainerHost<EditTodoState, EditTodoSideEffect> {
 
-    companion object {
-        private const val TASK = "task"
-        private const val TASK_NAME = "task_name"
-        private const val TASK_IMPORTANT = "task_important"
-    }
+    val todo: TodoModel = EditTodoScreenDestination.argsFrom(handle).todo
+    override val container = container<EditTodoState, EditTodoSideEffect>(
+        EditTodoState(
+            todo.name,
+            todo.important,
+            formatter.format(todo.timestamp)
+        ),
+        handle
+    )
 
-    private val args = EditTodoScreenDestination.argsFrom(handle)
-
-    private var _event = Channel<EditTodoEvent> { }
-    val event: Flow<EditTodoEvent> = _event.receiveAsFlow()
-
-    private val todo: TodoModel by mutableStateOf(handle.get<TodoModel>(TASK) ?: args.todo)
-
-    var name: String by mutableStateOf(handle.get<String>(TASK_NAME) ?: todo.name)
-        private set
-
-    var important: Boolean by mutableStateOf(handle.get<Boolean>(TASK_IMPORTANT) ?: todo.important)
-        private set
-
-    val timestamp: String by mutableStateOf(formatter.format(todo.timestamp))
-
-    fun onNameChange(value: String) {
-        name = value
-        handle[TASK_NAME] = value
-    }
-
-    fun onImportantChange(value: Boolean) {
-        important = value
-        handle[TASK_IMPORTANT] = value
-    }
-
-    fun onUpdateTodo() {
-        viewModelScope.launch {
-            if (name.isBlank()) {
-                _event.send(EditTodoEvent.InvalidInput(message = R.string.error_name))
-                return@launch
-            }
-
-            repository.updateTodoSync(
-                todo.copy(
-                    name = name,
-                    important = important
-                )
+    fun onNameChange(value: String) = intent {
+        reduce {
+            state.copy(
+                name = value
             )
-
-            _event.send(EditTodoEvent.TodoUpdated)
         }
     }
 
-    sealed class EditTodoEvent {
-        data class InvalidInput(@StringRes val message: Int) : EditTodoEvent()
-        object TodoUpdated : EditTodoEvent()
+    fun onImportantChange(value: Boolean) = intent {
+        reduce {
+            state.copy(
+                important = value
+            )
+        }
+    }
+
+    fun onUpdateTodo() = intent {
+        if (state.name.isBlank()) {
+            postSideEffect(EditTodoSideEffect.InvalidInput(message = R.string.error_name))
+            return@intent
+        }
+
+        repository.updateTodoSync(
+             todo.copy(
+                 name= state.name,
+                 important = state.important
+             )
+        )
+
+        postSideEffect(EditTodoSideEffect.TodoUpdated)
     }
 }
