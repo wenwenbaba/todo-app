@@ -1,166 +1,197 @@
 package xyz.teamgravity.todo.presentation.viewmodel
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import android.os.Parcelable
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.parcelize.Parcelize
+import org.orbitmvi.orbit.ContainerHost
+import org.orbitmvi.orbit.syntax.simple.intent
+import org.orbitmvi.orbit.syntax.simple.postSideEffect
+import org.orbitmvi.orbit.syntax.simple.reduce
+import org.orbitmvi.orbit.viewmodel.container
 import xyz.teamgravity.todo.core.util.Preferences
+import xyz.teamgravity.todo.core.util.PreferencesModel
 import xyz.teamgravity.todo.core.util.TodoSort
 import xyz.teamgravity.todo.data.model.TodoModel
 import xyz.teamgravity.todo.data.repository.TodoRepository
 import javax.inject.Inject
 
+@Parcelize
+data class TodoListState(
+    val query: String = "",
+    var todos: List<TodoModel> = emptyList(),
+    var searchExpanded: Boolean = false,
+    var menuExpanded: Boolean = false,
+    var sortExpanded: Boolean = false,
+    var hideCompleted: Boolean = false,
+    var deleteCompletedDialog: Boolean = false,
+    var deleteAllDialog: Boolean = false
+) : Parcelable
+
+sealed class TodoListSideEffect() {
+    object TodoDeleted : TodoListSideEffect()
+}
+
 @HiltViewModel
 class TodoListViewModel @Inject constructor(
     private val repository: TodoRepository,
     private val preferences: Preferences
-) : ViewModel() {
+) : ViewModel(), ContainerHost<TodoListState, TodoListSideEffect> {
 
-    private val _event = Channel<TodoListEvent> { }
-    val event: Flow<TodoListEvent> = _event.receiveAsFlow()
-
-    private val _query = MutableStateFlow("")
-    val query: StateFlow<String> = _query.asStateFlow()
-
-    var todos: List<TodoModel> by mutableStateOf(emptyList())
-        private set
-
-    var searchExpanded: Boolean by mutableStateOf(false)
-        private set
-
-    var menuExpanded: Boolean by mutableStateOf(false)
-        private set
-
-    var sortExpanded: Boolean by mutableStateOf(false)
-        private set
-
-    var hideCompleted: Boolean by mutableStateOf(false)
-        private set
-
-    var deleteCompletedDialog: Boolean by mutableStateOf(false)
-        private set
-
-    var deleteAllDialog: Boolean by mutableStateOf(false)
-        private set
-
-    private var deletedTodo: TodoModel? = null
-
-    init {
+    override val container = container<TodoListState, TodoListSideEffect>(TodoListState())
+    init
+    {
         observeTodos()
     }
 
-    private fun observeTodos() {
-        viewModelScope.launch {
-            combine(_query, preferences.preferences) { query, preferences ->
-                Pair(query, preferences)
-            }.flatMapLatest { (query, preferences) ->
-                hideCompleted = preferences.hideCompleted
-                repository.getTodos(query, preferences.hideCompleted, preferences.sort)
-            }.collectLatest { todos ->
-                this@TodoListViewModel.todos = todos
+    private var deletedTodo: TodoModel? = null
+
+    private fun observeTodos() = intent {
+        // 目前来看 自动查询的触发 来自于 preferences
+        // sort 和 hideCompleted 在UI侧被修改后 , 会执行store的修改方法, 执行后 preferences的 state会被VM观察到
+        // flatMapLatest 会再次触发 repository.getTodos 然后UI刷新
+        val preferencesModel: PreferencesModel = preferences.preferences.first()
+
+        repository.getTodos(state.query, preferencesModel.hideCompleted, preferencesModel.sort)
+            .collectLatest {
+            reduce {
+                state.copy(
+                    hideCompleted = preferencesModel.hideCompleted,
+                    todos = it
+                )
             }
         }
     }
 
-    fun onQueryChange(value: String) {
-        viewModelScope.launch { _query.emit(value) }
-    }
 
-    fun onTodoChecked(todo: TodoModel, checked: Boolean) {
-        viewModelScope.launch { repository.updateTodoSync(todo.copy(completed = checked)) }
-    }
-
-    fun onTodoDelete(todo: TodoModel) {
-        viewModelScope.launch {
-            deletedTodo = todo
-            repository.deleteTodoSync(todo)
-            _event.send(TodoListEvent.TodoDeleted)
+    fun onQueryChange(value: String) = intent {
+        reduce {
+            state.copy(
+                query = value
+            )
         }
     }
 
-    fun onUndoDeletedTodo() {
-        viewModelScope.launch { deletedTodo?.let { repository.insertTodoSync(it.copy(_id = 0)) } }
+    fun onTodoChecked(todo: TodoModel, checked: Boolean) = intent {
+        repository.updateTodoSync(todo.copy(completed = checked))
     }
 
-    fun onSearchExpanded() {
-        searchExpanded = true
+    fun onTodoDelete(todo: TodoModel) = intent {
+        deletedTodo = todo
+        repository.deleteTodoSync(todo)
+        postSideEffect(TodoListSideEffect.TodoDeleted)
     }
 
-    fun onSearchCollapsed() {
-        viewModelScope.launch {
-            _query.emit("")
-            searchExpanded = false
+    fun onUndoDeletedTodo() = intent {
+        deletedTodo?.let {
+            repository.insertTodoSync(it.copy(_id = 0))
         }
     }
 
-    fun onMenuExpanded() {
-        menuExpanded = true
-    }
-
-    fun onMenuCollapsed() {
-        menuExpanded = false
-    }
-
-    fun onSortExpanded() {
-        sortExpanded = true
-    }
-
-    fun onSortCollapsed() {
-        sortExpanded = false
-    }
-
-    fun onSort(sort: TodoSort) {
-        viewModelScope.launch {
-            preferences.updateTodoSort(sort = sort)
-            onSortCollapsed()
+    fun onSearchExpanded() = intent {
+        reduce {
+            state.copy(
+                searchExpanded = true
+            )
         }
     }
 
-    fun onHideCompletedChange() {
-        viewModelScope.launch {
-            preferences.updateHideCompleted(!hideCompleted)
-            onMenuCollapsed()
+    fun onSearchCollapsed() = intent {
+        reduce {
+            state.copy(
+                query = "",
+                searchExpanded = false
+            )
         }
     }
 
-    fun onDeleteCompletedDialogShow() {
-        deleteCompletedDialog = true
+    fun onMenuExpanded() = intent {
+        reduce {
+            state.copy(
+                menuExpanded = true
+            )
+        }
+    }
+
+    fun onMenuCollapsed() = intent {
+        reduce {
+            state.copy(
+                menuExpanded = false
+            )
+        }
+    }
+
+    fun onSortExpanded() = intent {
+        reduce {
+            state.copy(
+                sortExpanded = true
+            )
+        }
+    }
+
+    fun onSortCollapsed() = intent {
+        reduce {
+            state.copy(
+                sortExpanded = false
+            )
+        }
+    }
+
+    fun onSort(sort: TodoSort) = intent {
+        preferences.updateTodoSort(sort = sort)
+        onSortCollapsed()
+    }
+
+    fun onHideCompletedChange() = intent {
+        preferences.updateHideCompleted(!state.hideCompleted)
         onMenuCollapsed()
     }
 
-    fun onDeleteCompletedDialogDismiss() {
-        deleteCompletedDialog = false
-    }
-
-    fun onDeleteCompleted() {
-        viewModelScope.launch {
-            repository.deleteAllCompletedTodo()
-            onDeleteCompletedDialogDismiss()
+    fun onDeleteCompletedDialogShow() = intent {
+        reduce {
+            state.copy(
+                deleteCompletedDialog = true
+            )
         }
-    }
-
-    fun onDeleteAllDialogShow() {
-        deleteAllDialog = true
         onMenuCollapsed()
     }
 
-    fun onDeleteAllDialogDismiss() {
-        deleteAllDialog = false
-    }
-
-    fun onDeleteAll() {
-        viewModelScope.launch {
-            repository.deleteAllTodo()
-            onDeleteAllDialogDismiss()
+    fun onDeleteCompletedDialogDismiss() = intent {
+        reduce {
+            state.copy(
+                deleteCompletedDialog = false
+            )
         }
     }
 
-    sealed class TodoListEvent {
-        object TodoDeleted : TodoListEvent()
+    fun onDeleteCompleted() = intent {
+        repository.deleteAllCompletedTodo()
+        onDeleteCompletedDialogDismiss()
+
     }
+
+    fun onDeleteAllDialogShow() = intent {
+        reduce {
+            state.copy(
+                deleteAllDialog = true
+            )
+        }
+        onMenuCollapsed()
+    }
+
+    fun onDeleteAllDialogDismiss() = intent {
+        reduce {
+            state.copy(
+                deleteAllDialog = false
+            )
+        }
+    }
+
+    fun onDeleteAll() = intent {
+        repository.deleteAllTodo()
+        onDeleteAllDialogDismiss()
+    }
+
 }
